@@ -67,6 +67,7 @@ jupyterlab==4.4.2
 jupyterlab-pygments==0.3.0
 jupyterlab-server==2.27.3
 jupyterlab-widgets==3.0.15
+liger-kernel==0.5.9
 markdown-it-py==3.0.0
 markupsafe==3.0.2
 matplotlib-inline==0.1.7
@@ -83,6 +84,20 @@ networkx==3.4.2
 notebook==7.4.2
 notebook-shim==0.2.4
 numpy==2.2.5
+nvidia-cublas-cu12==12.6.4.1
+nvidia-cuda-cupti-cu12==12.6.80
+nvidia-cuda-nvrtc-cu12==12.6.77
+nvidia-cuda-runtime-cu12==12.6.77
+nvidia-cudnn-cu12==9.5.1.17
+nvidia-cufft-cu12==11.3.0.4
+nvidia-cufile-cu12==1.11.1.6
+nvidia-curand-cu12==10.3.7.77
+nvidia-cusolver-cu12==11.7.1.2
+nvidia-cusparse-cu12==12.5.4.2
+nvidia-cusparselt-cu12==0.6.3
+nvidia-nccl-cu12==2.26.2
+nvidia-nvjitlink-cu12==12.6.85
+nvidia-nvtx-cu12==12.6.77
 openai==1.79.0
 overrides==7.7.0
 packaging==25.0
@@ -139,6 +154,7 @@ tornado==6.5
 tqdm==4.67.1
 traitlets==5.14.3
 transformers==4.51.3
+triton==3.3.0
 trl==0.17.0
 types-python-dateutil==2.9.0.20250516
 typing-extensions==4.13.2
