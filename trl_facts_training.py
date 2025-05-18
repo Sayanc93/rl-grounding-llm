@@ -54,6 +54,44 @@ def compute_task_reward(prediction, ground_truth):
     match_count = sum(1 for word in words if word in prediction)
     return match_count / len(words)
 
+# Separate reward functions for GRPO Trainer
+
+# Format reward function
+def format_reward_func(prompts, completions, **kwargs):
+    """
+    Reward function that checks if the output adheres to the required format
+    with <claim> and <evidence_pointer> tags.
+    """
+    return [compute_format_reward(completion) * 0.5 for completion in completions]
+
+# Grounding reward function
+def grounding_reward_func(prompts, completions, documents, verifier_tokenizer, verifier_model, **kwargs):
+    """
+    Reward function that verifies if claims are supported by evidence using
+    the verifier model.
+    """
+    rewards = []
+    
+    for i, completion in enumerate(completions):
+        triplets = parse_claims_and_evidence(completion)
+        r_grounding = 0.0
+        for claim, evidence_pointer, _ in triplets:
+            snippet = extract_snippet(documents[i], evidence_pointer)
+            r_grounding += advanced_verify_claim(claim, snippet, verifier_tokenizer, verifier_model)
+        if triplets:
+            r_grounding /= len(triplets)
+        rewards.append(r_grounding)
+        
+    return rewards
+
+# Task reward function
+def task_reward_func(prompts, completions, ground_truths, **kwargs):
+    """
+    Reward function that computes overlap between prediction and ground truth.
+    """
+    return [compute_task_reward(completion, ground_truth) 
+            for completion, ground_truth in zip(completions, ground_truths)]
+
 def main():
     parser = argparse.ArgumentParser(description="Run VeGoR training on the FACTS dataset using GRPO and Qwen models.")
     parser.add_argument("--policy_model_name", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="Huggingface model ID for the Qwen policy model.")
@@ -98,31 +136,42 @@ def main():
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         loss_type="dr_grpo",
-        use_vllm=True,
         scale_rewards=False,
         bf16=True,
         gradient_accumulation_steps=4,
         num_generations=8,
         logging_steps=1,
         max_grad_norm=0.1,
-        max_new_tokens=8192,
+        max_prompt_length=131072,
+        max_completion_length=8192,
         weight_decay = 0.1,
         warmup_ratio = 0.1,
         use_liger_kernel=True,
         report_to="wandb",
         data_seed=42,
         torch_compile=True,
-        vllm_mode="colocate",
-    )
-    trainer = GRPOTrainer(
-        model=policy_model,
-        tokenizer=policy_tokenizer,
-        args=training_args,
-        optimizers=["fused_adamw", "linear"],
-        optimize_cuda_cache=True,
     )
 
-    # Training loop
+    # Define verifier-dependent grounding reward as a lambda to avoid partial function
+    def grounding_reward_with_verifier(prompts, completions, documents, **kwargs):
+        return grounding_reward_func(prompts, completions, documents, 
+                                   verifier_tokenizer=verifier_tokenizer, 
+                                   verifier_model=verifier_model, **kwargs)
+
+    # Create reward functions list with weights
+    reward_funcs = [
+        format_reward_func,
+        grounding_reward_with_verifier,
+        task_reward_func
+    ]
+    
+    trainer = GRPOTrainer(
+        model=policy_model,
+        args=training_args,
+        reward_funcs=reward_funcs
+    )
+
+    # Training loop with integrated reward functions
     for epoch in range(args.epochs):
         logging.info(f"Starting epoch {epoch+1}/{args.epochs}")
         wandb.log({"epoch": epoch+1})
@@ -143,65 +192,26 @@ def main():
                 ground_truths.append(sample['ground_truth'])
                 documents.append(sample['document'])
             
-            # Generate outputs from the policy model
-            outputs = trainer.generate(prompts)
-            rewards_list = []
-            for i, output in enumerate(outputs):
-                decoded_output = policy_tokenizer.decode(output, skip_special_tokens=True)
-                r_format = compute_format_reward(decoded_output)
-                triplets = parse_claims_and_evidence(decoded_output)
-                r_grounding = 0.0
-                for claim, evidence_pointer, _ in triplets:
-                    snippet = extract_snippet(documents[i], evidence_pointer)
-                    r_grounding += advanced_verify_claim(claim, snippet, verifier_tokenizer, verifier_model)
-                if triplets:
-                    r_grounding /= len(triplets)
-                r_task = compute_task_reward(decoded_output, ground_truths[i])
-                total_reward = args.w_grounding * r_grounding + args.w_task * r_task + args.w_format * r_format
-                rewards_list.append(total_reward)
-                epoch_rewards.append(total_reward)
+            # Run GRPO training step - rewards are computed internally by the reward functions
+            # Note: We need to pass the additional arguments needed by our reward function
+            stats = trainer.train_on_batch({
+                "prompt": prompts,
+                "documents": documents,  # Custom column for our reward function
+                "ground_truths": ground_truths  # Custom column for our reward function
+            })
             
-            # Update the policy using GRPO step with computed rewards
-            trainer.step(prompts, outputs, rewards_list)
-            batch_avg_reward = sum(rewards_list)/len(rewards_list) if rewards_list else 0.0
+            # Log the batch rewards (now computed inside the trainer)
+            batch_avg_reward = stats.get("rewards/mean", 0.0)
             logging.info(f"Processed batch {batch_start // args.batch_size + 1}, average reward: {batch_avg_reward:.4f}")
             wandb.log({"batch": batch_start // args.batch_size + 1, "batch_avg_reward": batch_avg_reward})
+            
+            # Add to epoch rewards for tracking
+            if "rewards/values" in stats:
+                epoch_rewards.extend(stats["rewards/values"])
         
         epoch_avg_reward = sum(epoch_rewards)/len(epoch_rewards) if epoch_rewards else 0.0
         logging.info(f"Epoch {epoch+1} average reward: {epoch_avg_reward:.4f}")
         wandb.log({"epoch": epoch+1, "epoch_avg_reward": epoch_avg_reward})
-        # Optionally, evaluation on the eval_set can be performed per epoch
-    
-    # Final evaluation on test set
-    logging.info("Starting final evaluation on test set")
-    test_prompts = []
-    test_ground_truths = []
-    for sample in test_set:
-        prompt = (
-            f"Document: {sample['document']}\n"
-            f"User Query: {sample['query']}\n"
-            "Answer in format: <claim>...</claim> <evidence_pointer>...</evidence_pointer> <confidence>...</confidence> ..."
-        )
-        test_prompts.append(prompt)
-        test_ground_truths.append(sample['ground_truth'])
-    test_outputs = trainer.generate(test_prompts, max_new_tokens=8192)
-    test_rewards = []
-    for i, output in enumerate(test_outputs):
-        decoded_output = policy_tokenizer.decode(output, skip_special_tokens=True)
-        r_format = compute_format_reward(decoded_output)
-        triplets = parse_claims_and_evidence(decoded_output)
-        r_grounding = 0.0
-        for claim, evidence_pointer, _ in triplets:
-            snippet = extract_snippet(test_set[i]['document'], evidence_pointer)
-            r_grounding += advanced_verify_claim(claim, snippet, verifier_tokenizer, verifier_model)
-        if triplets:
-            r_grounding /= len(triplets)
-        r_task = compute_task_reward(decoded_output, test_ground_truths[i])
-        total_reward = args.w_grounding * r_grounding + args.w_task * r_task + args.w_format * r_format
-        test_rewards.append(total_reward)
-    avg_test_reward = sum(test_rewards) / len(test_rewards) if test_rewards else 0.0
-    logging.info(f"Test set average reward: {avg_test_reward:.4f}")
-    wandb.log({"avg_test_reward": avg_test_reward})
     
     # Save model
     policy_model.save_pretrained("trained_qwen_policy")

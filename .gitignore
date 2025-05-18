@@ -21,6 +21,7 @@ wheels/
 *.egg
 .mypy_cache/
 .ipynb_checkpoints/
+wandb/
 
 # Virtual Environment
 .venv/
