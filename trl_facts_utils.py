@@ -1,86 +1,53 @@
 import re
 from typing import List, Tuple, Optional
 
-def extract_snippet(document: str, evidence_pointer: str) -> str:
+def advanced_verify_claim(user_prompt: str, evidence_pointer: str, verifier_tokenizer, verifier_model):
     """
-    Extracts a snippet from the document based on the evidence pointer.
-    Evidence pointer can be a sentence number, paragraph number, or a verbatim quote.
-    Returns the most relevant snippet or an empty string if not found.
-    """
-    # Try to match sentence or paragraph number
-    sent_match = re.search(r"Sent(?:ence)?\s*(\d+)", evidence_pointer, re.IGNORECASE)
-    para_match = re.search(r"Para(?:graph)?\s*(\d+)", evidence_pointer, re.IGNORECASE)
-    quote_match = re.search(r'"(.+?)"', evidence_pointer)
-    
-    # Split document into paragraphs and sentences
-    paragraphs = [p.strip() for p in document.split("\n") if p.strip()]
-    sentences = [s.strip() for p in paragraphs for s in re.split(r'(?<=[.!?]) +', p)]
-    
-    if sent_match:
-        idx = int(sent_match.group(1)) - 1
-        if 0 <= idx < len(sentences):
-            return sentences[idx]
-    if para_match:
-        idx = int(para_match.group(1)) - 1
-        if 0 <= idx < len(paragraphs):
-            return paragraphs[idx]
-    if quote_match:
-        quote = quote_match.group(1)
-        for sent in sentences:
-            if quote in sent:
-                return sent
-        for para in paragraphs:
-            if quote in para:
-                return para
-    # Fallback: return evidence_pointer if it's a substring in the document
-    if evidence_pointer in document:
-        return evidence_pointer
-    return ""
-
-def advanced_verify_claim(claim: str, snippet: str, verifier_tokenizer, verifier_model, threshold: float = 0.5) -> float:
-    """
-    Use the verifier critic to check if the claim is supported by the snippet.
+    Use the verifier critic to check if the response is supported by the snippet.
     Returns a reward: +1 for 'Yes', -1 for 'No', -0.5 for 'Uncertain'.
     If the verifier model outputs a confidence score, use it for finer reward granularity.
     """
     prompt = (
-        f"Document Snippet: {snippet}\n"
-        f"Claim: {claim}\n"
-        "Is the claim directly and verifiably supported by ONLY the provided document snippet? "
-        "Respond with 'Yes', 'No', or 'Uncertain'. Optionally, provide a confidence score between 0 and 1."
+        f"User Prompt: {user_prompt}\n"
+        f"Response Evidence Pointer: {evidence_pointer}\n"
+        "Is the response evidence directly and verifiably supported by the provided user prompt?"
+        "Respond with 'Yes', 'No', or 'Uncertain'."
     )
-    inputs = verifier_tokenizer(prompt, return_tensors="pt")
-    inputs = {k: v.to(verifier_model.device) for k, v in inputs.items()}
-    outputs = verifier_model.generate(**inputs, max_new_tokens=20)
-    answer = verifier_tokenizer.decode(outputs[0], skip_special_tokens=True).strip().lower()
-    # Try to extract confidence score
-    conf_match = re.search(r"([01](?:\.\d+)?)", answer)
-    if "yes" in answer:
-        if conf_match:
-            conf = float(conf_match.group(1))
-            return min(1.0, max(0.0, conf))
-        return 1.0
-    elif "no" in answer:
-        if conf_match:
-            conf = float(conf_match.group(1))
-            return -min(1.0, max(0.0, conf))
-        return -1.0
-    else:
-        if conf_match:
-            conf = float(conf_match.group(1))
-            return -0.5 * min(1.0, max(0.0, conf))
-        return -0.5
 
-def parse_claims_and_evidence(output: str) -> List[Tuple[str, str, Optional[str]]]:
+    messages = [
+        {"role": "user", "content": prompt}
+    ]
+
+    text = verifier_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    model_inputs = verifier_tokenizer([text], return_tensors="pt").to(verifier_model.device)
+    generated_ids = verifier_model.generate(
+        **model_inputs,
+        max_new_tokens=10
+    )
+
+    generated_ids = [
+        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+    ]
+    answer = verifier_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].lower().strip()
+
+    if "yes" in answer:
+        return (text, answer, 2.0)
+    else:
+        return (text, answer, 0.0)
+
+def parse_response_and_evidence(output: str) -> List[Tuple[str, str]]:
     """
-    Parses the output for (<claim>, <evidence_pointer>, <confidence>) triplets.
+    Parses the output for (<response>, <evidence_pointer>) tuple.
     Returns a list of tuples.
     """
-    claims = re.findall(r"<claim>(.*?)</claim>", output, re.DOTALL)
+    responses = re.findall(r"<response>(.*?)</response>", output, re.DOTALL)
     evidences = re.findall(r"<evidence_pointer>(.*?)</evidence_pointer>", output, re.DOTALL)
-    confidences = re.findall(r"<confidence>(.*?)</confidence>", output, re.DOTALL)
-    triplets = []
-    for i in range(min(len(claims), len(evidences))):
-        conf = confidences[i] if i < len(confidences) else None
-        triplets.append((claims[i].strip(), evidences[i].strip(), conf.strip() if conf else None))
-    return triplets
+    response_and_evidence = []
+    for i in range(min(len(responses), len(evidences))):
+        response_and_evidence.append((responses[i].strip(), evidences[i].strip()))
+    return response_and_evidence
