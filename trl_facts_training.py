@@ -24,8 +24,7 @@ except ImportError:
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-SYSTEM_PROMPT = """You are a helpful assistant. Respond in the following format strictly and provide only the content between the tags:
-
+SYSTEM_PROMPT = """Respond in the following format:
 <response>
 assistant response
 </response>
@@ -38,8 +37,9 @@ def load_data(data_dir):
     train_set = load_dataset('json', data_files=f"{data_dir}/train.jsonl")['train']
     train_set = train_set.map(lambda x: { # type: ignore
         'prompt': [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
-            {'role': 'user', 'content': x['full_prompt']}
+            {'role': 'system', 'content': ""},
+            {'role': 'user', 'content': x['full_prompt']},
+            {'role': 'user', 'content': SYSTEM_PROMPT},
         ],
     })
     return train_set
@@ -49,17 +49,17 @@ def compute_format_reward(output):
     Check if the output adheres to the required augmented format with <claim> and <evidence_pointer> tags.
     Returns +1 if at least one valid pair is found, 0 otherwise.
     """
-    claims = re.findall(r"<response>(.*?)</response>", output, re.DOTALL)
-    evidence = re.findall(r"<evidence_pointer>(.*?)</evidence_pointer>", output, re.DOTALL)
+    claims = re.findall(r"<response>[\s\S]*</response>", output, re.DOTALL)
+    evidences = re.findall(r"<evidence_pointer>[\s\S]*</evidence_pointer>", output, re.DOTALL)
 
     reward = 0.0
-    if claims:
-        reward += 0.5
-    if evidence:
-        reward += 0.5
+    if claims and len(claims) == 1:
+        reward += 0.25
+    if evidences and len(evidences) == 1:
+        reward += 0.25
 
-    if re.match(r"<response>.*?</response>\s*<evidence_pointer>.*?</evidence_pointer>", output, flags=re.DOTALL):
-        reward += 1.0
+    if re.match(r"<response>[\s\S]*</response>\s*<evidence_pointer>[\s\S]*</evidence_pointer>", output, flags=re.DOTALL):
+        reward += 0.5
 
     return reward
 
@@ -83,8 +83,15 @@ class GroundingRewardFunc:
             parsed_response = parse_response_and_evidence(completion[0]['content'])
             r_grounding = 0.0
 
-            for _response, evidence_pointer in parsed_response:
-                prompt, answer, reward = advanced_verify_claim(prompts[i][1]['content'], evidence_pointer, self.verifier_tokenizer, self.verifier_model)
+            if parsed_response:
+                response, evidence_pointer = parsed_response[0]
+                _, _, reward = advanced_verify_claim(
+                    prompts[i][1]['content'],
+                    response,
+                    evidence_pointer,
+                    self.verifier_tokenizer,
+                    self.verifier_model
+                )
                 r_grounding += reward
             rewards.append(r_grounding)
         return rewards
@@ -148,7 +155,7 @@ def main():
         bf16=True,
         gradient_accumulation_steps=4,
         gradient_checkpointing=True,
-        num_generations=8,
+        num_generations=4,
         save_steps=100,
         logging_steps=1,
         log_completions=True,
