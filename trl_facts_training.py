@@ -84,10 +84,10 @@ class GroundingRewardFunc:
             r_grounding = 0.0
 
             if parsed_response:
-                response, evidence_pointer = parsed_response[0]
+                _response, evidence_pointer = parsed_response[0]
                 _, _, reward = advanced_verify_claim(
                     prompts[i][1]['content'],
-                    response,
+                    _response,
                     evidence_pointer,
                     self.verifier_tokenizer,
                     self.verifier_model

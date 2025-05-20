@@ -23,6 +23,7 @@ wheels/
 .ipynb_checkpoints/
 wandb/
 results/
+trained_qwen_policy
 
 # Virtual Environment
 .venv/
