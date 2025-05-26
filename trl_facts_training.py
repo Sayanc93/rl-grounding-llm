@@ -37,9 +37,8 @@ def load_data(data_dir):
     train_set = load_dataset('json', data_files=f"{data_dir}/train.jsonl")['train']
     train_set = train_set.map(lambda x: { # type: ignore
         'prompt': [
-            {'role': 'system', 'content': ""},
-            {'role': 'user', 'content': x['full_prompt']},
-            {'role': 'user', 'content': SYSTEM_PROMPT},
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': x['full_prompt']}
         ],
     })
     return train_set
@@ -155,21 +154,25 @@ def main():
         bf16=True,
         gradient_accumulation_steps=4,
         gradient_checkpointing=True,
-        num_generations=4,
+        num_generations=8,
         save_steps=100,
-        logging_steps=1,
+        logging_steps=10,
         log_completions=True,
         max_completion_length=8192,
         max_grad_norm=0.1,
         weight_decay = 0.1,
         warmup_ratio = 0.1,
         temperature=1.0,
+        top_k=-1,
         use_liger_kernel=True,
         report_to="wandb",
         data_seed=42,
         torch_compile=True,
         beta=0.0,
-        log_on_each_node=False
+        mask_truncated_completions=True,
+        log_on_each_node=False,
+        use_vllm=True,
+        vllm_mode="colocate",
     )
 
     # Create reward functions list with weights
