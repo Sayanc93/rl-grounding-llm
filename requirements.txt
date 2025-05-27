@@ -48,6 +48,7 @@ fastapi-cli==0.0.7
 fastjsonschema==2.21.1
 fastrlock==0.8.3
 filelock==3.18.0
+flashinfer-python==0.2.5
 fqdn==1.5.1
 frozenlist==1.6.0
 fsspec==2025.3.0

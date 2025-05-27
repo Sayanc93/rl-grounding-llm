@@ -108,8 +108,6 @@ def main():
     parser.add_argument("--verifier_model_name", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Huggingface model ID for the Qwen verifier model.")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size for RL training.")
     parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
-    parser.add_argument("--w_grounding", type=float, default=1.0, help="Weight for grounding reward.")
-    parser.add_argument("--w_format", type=float, default=0.5, help="Weight for soft format reward.")
     parser.add_argument("--output_dir", type=str, default="./results", help="Output directory for results.")
     parser.add_argument("--run_name", type=str, default="trl-facts-grpo-training", help="Run name for wandb.")
     args = parser.parse_args()
@@ -158,6 +156,7 @@ def main():
         save_steps=100,
         logging_steps=10,
         log_completions=True,
+        max_prompt_length=policy_tokenizer.model_max_length,
         max_completion_length=8192,
         max_grad_norm=0.1,
         weight_decay = 0.1,
@@ -167,12 +166,12 @@ def main():
         use_liger_kernel=True,
         report_to="wandb",
         data_seed=42,
-        torch_compile=True,
         beta=0.0,
         mask_truncated_completions=True,
         log_on_each_node=False,
         use_vllm=True,
         vllm_mode="colocate",
+        vllm_gpu_memory_utilization=0.9,
     )
 
     # Create reward functions list with weights
