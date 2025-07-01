@@ -153,7 +153,7 @@ pandocfilters==1.5.1
 parso==0.8.4
 partial-json-parser==0.2.1.1.post5
 pexpect==4.9.0
-pillow==11.2.1
+pillow==11.3.0
 platformdirs==4.3.8
 prometheus-client==0.22.0
 prometheus-fastapi-instrumentator==7.1.0
