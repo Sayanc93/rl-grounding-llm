@@ -215,7 +215,7 @@ torchvision==0.21.0
 tornado==6.5
 tqdm==4.67.1
 traitlets==5.14.3
-transformers==4.51.3
+transformers==4.52.1
 triton==3.2.0
 trl @ git+https://github.com/huggingface/trl.git@c7e3f096a54553fdcde341bc4a1df130736d4da6
 typer==0.16.0
